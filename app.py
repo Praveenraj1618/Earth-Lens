@@ -128,6 +128,7 @@ def difference_products(a: Image.Image, b: Image.Image, threshold_value: int, ov
     return aa, bb, Image.fromarray(normalized), Image.fromarray(overlay), changed_pct
 
 
+@st.cache_resource(show_spinner=False)
 def load_model(model_name: str):
     import torch
     from transformers import AutoProcessor
