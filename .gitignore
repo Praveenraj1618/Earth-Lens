@@ -4,4 +4,6 @@ __pycache__/
 venv/
 .env
 .streamlit/secrets.toml
+.pytest_cache/
 .DS_Store
+evidence-preview.png
