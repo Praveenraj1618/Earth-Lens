@@ -324,9 +324,11 @@ if analyze:
 
 analysis = st.session_state.get("analysis")
 if analysis:
+    analyzed_before_date = date.fromisoformat(analysis["before_date"])
+    analyzed_after_date = date.fromisoformat(analysis["after_date"])
     st.divider()
     st.markdown("### Change review")
-    if after_date <= before_date:
+    if analyzed_after_date <= analyzed_before_date:
         st.warning("The later image date should be after the earlier image date. Check the dates before interpreting this comparison.")
     st.caption(f"{analysis['before_date']} → {analysis['after_date']}" + (f" · {analysis['location']}" if analysis["location"] else ""))
     c1, c2, c3 = st.columns(3)
@@ -361,7 +363,7 @@ if analysis:
         st.info("Highlighted pixels are candidates only. Misalignment, clouds, shadows, season, sensor, and processing differences can create false change signals.")
         if analysis["alignment"]["score"] is not None:
             st.caption(f"Translation alignment attempted · ECC fit {analysis['alignment']['score']:.3f} · estimated shift {analysis['alignment']['offset'][0]:.1f}px, {analysis['alignment']['offset'][1]:.1f}px. ECC fit is not a probability or accuracy score.")
-        elif register:
+        elif analysis["alignment"]["message"] != "Not requested":
             st.warning(analysis["alignment"]["message"])
         st.image(analysis["valid_mask"], caption="Pixels included in the difference calculation (black border excluded after alignment)", width=320)
     with tab3:
@@ -396,10 +398,10 @@ if analysis:
             st.warning("The source images have noticeably different aspect ratios. They were padded to a shared canvas; check crop and framing manually.")
         else:
             st.success("Source aspect ratios are reasonably similar. This does not confirm that the images are geographically registered.")
-        if after_date <= before_date:
+        if analyzed_after_date <= analyzed_before_date:
             st.error("The later date must be after the earlier date for a time comparison.")
         else:
-            st.write(f"Time interval: **{(after_date - before_date).days} days**. Seasonal and acquisition differences may still matter.")
+            st.write(f"Time interval: **{(analyzed_after_date - analyzed_before_date).days} days**. Seasonal and acquisition differences may still matter.")
         st.write(f"Alignment: **{analysis['alignment']['message']}**")
         if analysis["source"] == "Built-in synthetic demo":
             st.info("This pair is procedurally generated for a controlled UI demonstration. It is not satellite data and is not evidence of model accuracy.")
