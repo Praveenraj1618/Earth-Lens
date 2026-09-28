@@ -7,10 +7,11 @@
 ## What it does
 
 - Compare before/after satellite or aerial images with dates and optional location.
-- Generate an interpretable candidate-change overlay using a simple pixel-difference baseline.
-- Summarize each image and the pair using an open vision-language model (SmolVLM by default), when enabled.
+- Generate a candidate-change overlay using a simple pixel-difference baseline.
+- Use an open vision-language model (SmolVLM by default) to describe each image and compare the pair in one multimodal prompt.
 - Export a Markdown review card with metadata, observations, and limitations.
-- Run in **Preview mode** without downloading a model, so the interface and baseline overlay can be shown immediately.
+- Include a deterministic **synthetic demo pair** for an immediate walkthrough. It is an illustration, not real satellite imagery.
+- Run in Preview mode without downloading a model.
 
 ## Run locally
 
@@ -24,14 +25,14 @@ pip install -r requirements.txt
 streamlit run app.py
 ```
 
-Open the local URL printed by Streamlit. Upload a pair of images, enter dates and an optional location, adjust the threshold, then select **Analyze image pair**.
+Select **Built-in synthetic demo** for an instant example, or **Upload image pair** to use your own images. Add image dates and optional location, adjust the threshold, then select **Analyze image pair**.
 
 ## Optional open-source VLM
 
-The default model is `HuggingFaceTB/SmolVLM-500M-Instruct`. Inference uses Transformers and PyTorch. Install the optional dependencies:
+The default model is `HuggingFaceTB/SmolVLM-500M-Instruct`. Inference uses Transformers and PyTorch. Install the optional model dependencies:
 
 ```bash
-pip install torch transformers
+pip install -r requirements-vlm.txt
 ```
 
 Then select **Use vision-language model** in the sidebar. The first run downloads model weights from Hugging Face and requires internet access. Model inference may be slow on CPU; a supported GPU can help. If loading fails, switch back to Preview mode. You can select another compatible image-text model by setting `EARTHLENS_MODEL_ID` before starting Streamlit.
@@ -40,20 +41,20 @@ This application does not send images to a hosted inference API. In local VLM mo
 
 ## How the prototype works
 
-1. The app loads and resizes the image pair to a common display size. It does not perform geospatial registration.
+1. The app loads the image pair onto a shared display canvas while preserving aspect ratio. It does not perform geospatial registration.
 2. A normalized RGB absolute-difference map highlights pixels that differ. A threshold suppresses small changes; the overlay marks remaining candidate pixels.
-3. The VLM describes each image and compares the pair. The app asks it to separate visible evidence from uncertain interpretation.
+3. The VLM describes each image separately, then receives both images together to compare them. It is prompted to separate visible evidence from uncertain interpretation.
 4. The analyst reviews the originals, overlay, and model output, then downloads a Markdown review card.
 
-The pixel baseline is intentionally simple and does not know geographic coordinates, sensor calibration, or semantic classes. It is useful for a prototype demo, not scientific measurement.
+The pixel baseline does not know geographic coordinates, sensor calibration, or semantic classes. Candidate pixel share is not a measured land area or a probability. The synthetic pair is only for demonstrating the workflow.
 
 ## Suggested demo
 
-1. Load two images of the same place from different dates, ideally with similar season, resolution, and viewing conditions.
-2. Compare originals and overlay; explain that highlighted pixels are candidates only.
-3. Ask a focused question such as “What visible differences appear between these dated images? Separate direct observations from possible explanations.”
-4. Show one failure case (cloud/shadow or seasonal change) and the uncertainty note.
-5. Download the review card.
+1. Use the built-in synthetic pair to show the end-to-end interaction, and explicitly identify it as synthetic.
+2. For the judged Earth-observation example, load two real images of the same place and dates, ideally with similar season, resolution, and viewing conditions.
+3. Compare originals and overlay; explain that highlighted pixels are candidates only.
+4. Ask a focused question such as “What visible differences appear between these dated images? Separate direct observations from possible explanations.”
+5. Show one failure case (cloud/shadow or seasonal change) and the uncertainty note, then download the review card.
 
 Use imagery that you have permission to redistribute or present, and retain its source, date, and license in your submission.
 
@@ -61,8 +62,9 @@ Use imagery that you have permission to redistribute or present, and retain its 
 
 ```
 app.py                 Streamlit UI, image comparison, optional VLM, report export
-requirements.txt       Core dependencies
-README.md             Setup, behavior, limitations, demo guidance
+requirements.txt       Core app dependencies
+requirements-vlm.txt   Optional local VLM dependencies
+README.md              Setup, behavior, limitations, demo guidance
 ```
 
 ## Next steps for the 24-hour final
