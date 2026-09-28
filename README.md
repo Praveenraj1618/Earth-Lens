@@ -1,23 +1,27 @@
 # EarthLens
 
-**Satellite image change triage for human review.** EarthLens compares two dated images, surfaces candidate visual changes, and helps an analyst inspect them with an open-source vision-language model.
+**Satellite-image change triage for human review.** EarthLens compares two dated satellite or aerial images, highlights candidate visual differences, and lets an analyst inspect those signals with a local open-source vision-language model.
 
-> EarthLens is a prototype. Its image-difference map is a visual cue, not verified land-cover change. Differences can come from misalignment, clouds, haze, shadows, seasons, sensor changes, or image processing. Review the source imagery before acting.
+> This is a hackathon prototype, not a validated remote-sensing system. Candidate pixels are not confirmed land-cover change or measured area. Misregistration, clouds, haze, shadows, seasonal changes, sensors, and processing can create false signals.
 
-## What it does
+## Prototype features
 
-- Compare before/after satellite or aerial images with dates and optional location.
-- Generate a candidate-change overlay using a simple pixel-difference baseline.
-- Use an open vision-language model (SmolVLM by default) to describe each image and compare the pair in one multimodal prompt.
-- Export a Markdown review card with metadata, observations, and limitations.
-- Include a deterministic **synthetic demo pair** for an immediate walkthrough. It is an illustration, not real satellite imagery.
-- Run in Preview mode without downloading a model.
+- Upload before/after image pairs, dates, and optional location.
+- Review side-by-side originals, a normalized RGB difference view, and a candidate-pixel overlay.
+- Optionally try **translation-only** image alignment with OpenCV ECC. Alignment is best-effort; its fit score is not a confidence or accuracy score.
+- Choose a review focus and ask a question. An optional local open model describes each image and receives both images together for a pairwise interpretation.
+- Review input-quality checks and download a Markdown review card plus a presentation-ready PNG evidence sheet.
+- Run three transparent synthetic checks: known new construction, no scene change, and a brightness-only false alarm.
+
+The synthetic cases provide known toy masks so EarthLens can show precision, recall, and IoU for the simple RGB baseline. They test implementation behavior on generated images only. **They are not evidence of accuracy on satellite imagery.** The lighting-shift case is included to show a concrete failure mode.
 
 ## Run locally
 
-Requires Python 3.10 or newer.
+Use Python 3.10 or newer.
 
 ```bash
+git clone https://github.com/Praveenraj1618/Earth-Lens.git
+cd Earth-Lens
 python -m venv .venv
 # Windows PowerShell: .venv\\Scripts\\Activate.ps1
 # macOS/Linux: source .venv/bin/activate
@@ -25,54 +29,64 @@ pip install -r requirements.txt
 streamlit run app.py
 ```
 
-Select **Built-in synthetic demo** for an instant example, or **Upload image pair** to use your own images. Add image dates and optional location, adjust the threshold, then select **Analyze image pair**.
+Choose **Built-in synthetic demo** for a repeatable walkthrough, or **Upload image pair** to inspect your own data. Use images of the same place and check the acquisition dates and source licenses.
 
-## Optional open-source VLM
+## Optional local vision-language model
 
-The default model is `HuggingFaceTB/SmolVLM-500M-Instruct`. Inference uses Transformers and PyTorch. Install the optional model dependencies:
+The default model is [HuggingFaceTB/SmolVLM-500M-Instruct](https://huggingface.co/HuggingFaceTB/SmolVLM-500M-Instruct). Install the optional dependencies:
 
 ```bash
 pip install -r requirements-vlm.txt
 ```
 
-Then select **Use vision-language model** in the sidebar. The first run downloads model weights from Hugging Face and requires internet access. Model inference may be slow on CPU; a supported GPU can help. If loading fails, switch back to Preview mode. You can select another compatible image-text model by setting `EARTHLENS_MODEL_ID` before starting Streamlit.
+Then enable **Use vision-language model** in the sidebar. The initial run downloads weights and needs internet access. Inference runs on the machine hosting the app; it does not send uploaded imagery to a hosted model API. CPU inference can be slow. Set `EARTHLENS_MODEL_ID` to use another compatible Transformers image-text model.
 
-This application does not send images to a hosted inference API. In local VLM mode, images are processed on the machine running the app, subject to the selected model's software and model licenses.
+Model descriptions and interpretations can be wrong. Treat them as analyst notes, verify them against the images, and never present generated text as confirmed evidence.
 
-## How the prototype works
+## How the comparison works
 
-1. The app loads the image pair onto a shared display canvas while preserving aspect ratio. It does not perform geospatial registration.
-2. A normalized RGB absolute-difference map highlights pixels that differ. A threshold suppresses small changes; the overlay marks remaining candidate pixels.
-3. The VLM describes each image separately, then receives both images together to compare them. It is prompted to separate visible evidence from uncertain interpretation.
-4. The analyst reviews the originals, overlay, and model output, then downloads a Markdown review card.
+1. Images are converted to RGB, aspect-preserving padded to a shared canvas, and resized for display. The app does **not** read georeferencing metadata or perform full geospatial registration.
+2. Optional alignment estimates a small translation with OpenCV `findTransformECC`; invalid border pixels are excluded. It cannot correct scale, rotation, terrain relief, perspective, or different map projections. The operator must verify that the result is sensible.
+3. The visual baseline computes a lightly smoothed mean absolute RGB pixel difference, then applies the sensitivity threshold. Candidate-pixel share is a percentage of valid display-canvas pixels, not geographic area or a probability.
+4. The optional VLM generates separate descriptions and a comparison prompt containing the before/after images. It is asked to separate visible observations from possible explanations.
+5. The analyst reviews the images, candidate overlay, input checks, model text, and downloaded evidence sheet.
 
-The pixel baseline does not know geographic coordinates, sensor calibration, or semantic classes. Candidate pixel share is not a measured land area or a probability. The synthetic pair is only for demonstrating the workflow.
+## Run the tests
 
-## Suggested demo
-
-1. Use the built-in synthetic pair to show the end-to-end interaction, and explicitly identify it as synthetic.
-2. For the judged Earth-observation example, load two real images of the same place and dates, ideally with similar season, resolution, and viewing conditions.
-3. Compare originals and overlay; explain that highlighted pixels are candidates only.
-4. Ask a focused question such as “What visible differences appear between these dated images? Separate direct observations from possible explanations.”
-5. Show one failure case (cloud/shadow or seasonal change) and the uncertainty note, then download the review card.
-
-Use imagery that you have permission to redistribute or present, and retain its source, date, and license in your submission.
-
-## Project structure
-
-```
-app.py                 Streamlit UI, image comparison, optional VLM, report export
-requirements.txt       Core app dependencies
-requirements-vlm.txt   Optional local VLM dependencies
-README.md              Setup, behavior, limitations, demo guidance
+```bash
+pip install -r requirements-dev.txt
+python -m pytest -q
 ```
 
-## Next steps for the 24-hour final
+GitHub Actions runs syntax checks and the synthetic workflow tests on pushes and pull requests to `main`.
 
-- Add geospatial metadata and proper image co-registration before comparison.
-- Replace the RGB baseline with a validated remote-sensing change-detection method.
-- Add region selection, evidence-linked observations, and a small documented evaluation set.
-- Benchmark on representative pairs and report measured limits instead of a confidence score.
+## Demo sequence for judging
+
+1. Select **New construction** and show the known synthetic mask next to the detected overlay and toy precision/recall/IoU.
+2. Select **Lighting shift false alarm** and show how a nuisance change triggers the RGB baseline.
+3. Upload a real, properly sourced image pair for the Earth-observation demo; use the optional VLM only if it runs reliably on your machine.
+4. Explain that translation alignment is limited, compare original images, and download the review card and evidence sheet.
+
+Use imagery you are permitted to display and submit. Record its source, acquisition dates, region, and license in your presentation or submission.
+
+## Project files
+
+```
+app.py                       Streamlit application and analysis workflow
+requirements.txt             Core UI, image, and alignment dependencies
+requirements-vlm.txt         Optional local model dependencies
+requirements-dev.txt         Test dependencies
+tests/test_prototype.py      Synthetic workflow and alignment smoke tests
+.github/workflows/test.yml   GitHub Actions checks
+.streamlit/config.toml       EarthLens theme and upload limit
+```
+
+## What remains before making real-world claims
+
+- Use co-registered, georeferenced imagery and preserve sensor metadata.
+- Evaluate on a documented real satellite dataset with a suitable change-detection baseline and held-out scenes.
+- Validate cloud/shadow masking and the chosen change classes; report real precision/recall/IoU by scene.
+- Add region selection and evidence-linked model statements only after the underlying spatial grounding is validated.
 
 ## Team
 
