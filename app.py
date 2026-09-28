@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-import io
 import os
 from datetime import date
 from typing import Any
 
 import numpy as np
 import streamlit as st
-from PIL import Image, ImageFilter, ImageOps
+from PIL import Image, ImageDraw, ImageFilter, ImageOps
 
 MODEL_DEFAULT = os.getenv("EARTHLENS_MODEL_ID", "HuggingFaceTB/SmolVLM-500M-Instruct")
 
@@ -36,15 +35,23 @@ with st.sidebar:
     opacity = st.slider("Overlay strength", min_value=10, max_value=90, value=55, step=5)
     st.caption("Preview mode works without model weights. Image comparison is a visual baseline, not geospatial change detection.")
 
-left, right = st.columns(2, gap="large")
-with left:
-    st.markdown("#### 01 · Earlier image")
-    before_file = st.file_uploader("Upload an earlier satellite / aerial image", type=["png", "jpg", "jpeg", "webp", "tif", "tiff"], key="before")
-    before_date = st.date_input("Image date", value=date(2024, 1, 1), key="before_date")
-with right:
-    st.markdown("#### 02 · Later image")
-    after_file = st.file_uploader("Upload a later image of the same area", type=["png", "jpg", "jpeg", "webp", "tif", "tiff"], key="after")
-    after_date = st.date_input("Image date", value=date.today(), key="after_date")
+source = st.radio("Image source", ["Upload image pair", "Built-in synthetic demo"], horizontal=True)
+if source == "Upload image pair":
+    left, right = st.columns(2, gap="large")
+    with left:
+        st.markdown("#### 01 · Earlier image")
+        before_file = st.file_uploader("Upload an earlier satellite / aerial image", type=["png", "jpg", "jpeg", "webp", "tif", "tiff"], key="before")
+        before_date = st.date_input("Image date", value=date(2024, 1, 1), key="before_date")
+    with right:
+        st.markdown("#### 02 · Later image")
+        after_file = st.file_uploader("Upload a later image of the same area", type=["png", "jpg", "jpeg", "webp", "tif", "tiff"], key="after")
+        after_date = st.date_input("Image date", value=date.today(), key="after_date")
+    ready = bool(before_file and after_file)
+else:
+    before_file = after_file = None
+    before_date, after_date = date(2024, 1, 1), date(2025, 1, 1)
+    ready = True
+    st.info("Synthetic illustration only—not real satellite data. It shows how EarthLens marks candidate visual differences.")
 
 location = st.text_input("Place or coordinates (optional)", placeholder="e.g., Chennai, India · 13.08°N, 80.27°E")
 question = st.text_area("What should EarthLens inspect?", value="Describe the visible differences between these two images. Separate direct visual observations from possible explanations, and mention any image-quality limits.", height=90)
@@ -58,12 +65,45 @@ def load_rgb(upload: Any) -> Image.Image:
     return ImageOps.exif_transpose(im).convert("RGB")
 
 
+def make_demo_pair() -> tuple[Image.Image, Image.Image]:
+    """Create a deterministic, clearly synthetic top-down scene for a no-data demo."""
+    rng = np.random.default_rng(17)
+    h = w = 512
+    noise = rng.normal(0, 7, (h, w, 3))
+    base = np.zeros((h, w, 3), dtype=np.float32)
+    base[:] = (83, 111, 71)  # muted green land
+    base += noise
+    before = Image.fromarray(np.uint8(np.clip(base, 0, 255)))
+    after = before.copy()
+    d1, d2 = ImageDraw.Draw(before), ImageDraw.Draw(after)
+    # Stable river and road landmarks make the paired scene easy to compare.
+    river = [(0, 95), (90, 120), (180, 105), (280, 148), (390, 132), (512, 170)]
+    d1.line(river, fill=(58, 117, 145), width=46)
+    d2.line(river, fill=(58, 117, 145), width=46)
+    for draw in (d1, d2):
+        draw.line([(65, 0), (140, 512)], fill=(184, 174, 143), width=13)
+        draw.line([(0, 390), (512, 310)], fill=(184, 174, 143), width=10)
+        # Sparse, pale rooftops represent the existing settlement.
+        for x, y in [(255, 245), (286, 251), (318, 241), (272, 280), (310, 286)]:
+            draw.rectangle((x, y, x + 15, y + 11), fill=(173, 161, 137))
+    # New rectangular disturbance/construction area in the later illustrative scene.
+    d2.rectangle((365, 265, 474, 365), fill=(139, 119, 91))
+    for x in range(372, 470, 24):
+        d2.rectangle((x, 275, x + 15, 291), fill=(192, 179, 147))
+        d2.rectangle((x, 306, x + 15, 322), fill=(164, 151, 123))
+        d2.rectangle((x, 337, x + 15, 353), fill=(201, 185, 151))
+    return before, after
+
+
 def prepare_pair(a: Image.Image, b: Image.Image, max_side: int = 1280) -> tuple[Image.Image, Image.Image]:
     # Resizing to a shared canvas is for visual comparison only, not geographic co-registration.
     target = (max(a.width, b.width), max(a.height, b.height))
     scale = min(1.0, max_side / max(target))
     target = (max(1, int(target[0] * scale)), max(1, int(target[1] * scale)))
-    return a.resize(target, Image.Resampling.LANCZOS), b.resize(target, Image.Resampling.LANCZOS)
+    return (
+        ImageOps.pad(a, target, method=Image.Resampling.LANCZOS, color=(0, 0, 0)),
+        ImageOps.pad(b, target, method=Image.Resampling.LANCZOS, color=(0, 0, 0)),
+    )
 
 
 def difference_products(a: Image.Image, b: Image.Image, threshold_value: int, overlay_opacity: int):
@@ -90,12 +130,16 @@ def difference_products(a: Image.Image, b: Image.Image, threshold_value: int, ov
 
 def load_model(model_name: str):
     import torch
-    from transformers import AutoProcessor, AutoModelForVision2Seq
+    from transformers import AutoProcessor
+    try:
+        from transformers import AutoModelForImageTextToText as ModelClass
+    except ImportError:
+        from transformers import AutoModelForVision2Seq as ModelClass
     processor = AutoProcessor.from_pretrained(model_name)
     try:
-        model = AutoModelForVision2Seq.from_pretrained(model_name, torch_dtype="auto", device_map="auto")
+        model = ModelClass.from_pretrained(model_name, torch_dtype="auto", device_map="auto")
     except Exception:
-        model = AutoModelForVision2Seq.from_pretrained(model_name, torch_dtype="auto")
+        model = ModelClass.from_pretrained(model_name, torch_dtype="auto")
     return processor, model
 
 
@@ -115,32 +159,54 @@ def ask_vlm(processor, model, image: Image.Image, prompt: str) -> str:
     return processor.decode(new_tokens, skip_special_tokens=True).strip()
 
 
+def ask_vlm_pair(processor, model, before: Image.Image, after: Image.Image, prompt: str) -> str:
+    import torch
+    messages = [{"role": "user", "content": [
+        {"type": "image"}, {"type": "text", "text": "EARLIER IMAGE"},
+        {"type": "image"}, {"type": "text", "text": "LATER IMAGE"},
+        {"type": "text", "text": prompt},
+    ]}]
+    rendered = processor.apply_chat_template(messages, add_generation_prompt=True)
+    inputs = processor(text=rendered, images=[before, after], return_tensors="pt")
+    try:
+        inputs = {key: value.to(model.device) if hasattr(value, "to") else value for key, value in inputs.items()}
+    except AttributeError:
+        pass
+    with torch.inference_mode():
+        output = model.generate(**inputs, max_new_tokens=260, do_sample=False)
+    answer_tokens = output[0][inputs["input_ids"].shape[1]:]
+    return processor.decode(answer_tokens, skip_special_tokens=True).strip()
+
+
 def safe_model_analysis(model_name: str, before: Image.Image, after: Image.Image, q: str):
     try:
         processor, model = load_model(model_name)
         desc_a = ask_vlm(processor, model, before, "Describe only visible land-cover and built features. Do not infer causes.")
         desc_b = ask_vlm(processor, model, after, "Describe only visible land-cover and built features. Do not infer causes.")
-        # Pairwise prompt as a second image-grounded turn: present the later image and explicit observations for comparison.
-        pair_prompt = ("Compare this later satellite/aerial image with the earlier image observations below. "
-                       "Report concrete visible changes, distinguish observations from hypotheses, state uncertainty, and do not claim area measurements. "
-                       f"Earlier image observations: {desc_a}\\nQuestion: {q}")
-        comparison = ask_vlm(processor, model, after, pair_prompt)
+        pair_prompt = ("Compare the two satellite/aerial images in order. Report concrete visible differences, "
+                       "separate direct observations from possible explanations, mention uncertainty or image-quality limits, "
+                       "and do not claim area measurements. " + q)
+        comparison = ask_vlm_pair(processor, model, before, after, pair_prompt)
         return desc_a, desc_b, comparison, None
     except Exception as exc:
         return None, None, None, f"{type(exc).__name__}: {exc}"
 
 
-analyze = st.button("Analyze image pair", type="primary", use_container_width=True, disabled=not (before_file and after_file))
+analyze = st.button("Analyze image pair", type="primary", use_container_width=True, disabled=not ready)
 if analyze:
     try:
-        before = load_rgb(before_file)
-        after = load_rgb(after_file)
+        if source == "Built-in synthetic demo":
+            before, after = make_demo_pair()
+            before_name, after_name = "synthetic-before.png", "synthetic-after.png"
+        else:
+            before, after = load_rgb(before_file), load_rgb(after_file)
+            before_name, after_name = before_file.name, after_file.name
         bef, aft, diff, overlay, changed_pct = difference_products(before, after, threshold, opacity)
         st.session_state["analysis"] = {
             "before": bef, "after": aft, "diff": diff, "overlay": overlay,
             "changed_pct": changed_pct, "before_date": before_date.isoformat(), "after_date": after_date.isoformat(),
             "location": location.strip(), "question": question.strip(), "threshold": threshold,
-            "before_name": before_file.name, "after_name": after_file.name,
+            "before_name": before_name, "after_name": after_name, "source": source,
         }
         st.session_state.pop("vlm_result", None)
         if use_vlm:
@@ -156,8 +222,6 @@ if analysis:
     st.markdown("### Change review")
     if after_date <= before_date:
         st.warning("The later image date should be after the earlier image date. Check the dates before interpreting this comparison.")
-    if bef.width != aft.width or bef.height != aft.height:
-        pass
     st.caption(f"{analysis['before_date']} → {analysis['after_date']}" + (f" · {analysis['location']}" if analysis["location"] else ""))
     c1, c2, c3 = st.columns(3)
     c1.metric("Candidate pixels", f"{analysis['changed_pct']:.1f}%", help="Share of pixels above the selected RGB-difference threshold. Not a measured land area or probability.")
