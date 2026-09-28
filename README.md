@@ -23,8 +23,10 @@ Use Python 3.10 or newer.
 git clone https://github.com/Praveenraj1618/Earth-Lens.git
 cd Earth-Lens
 python -m venv .venv
-# Windows PowerShell: .venv\\Scripts\\Activate.ps1
-# macOS/Linux: source .venv/bin/activate
+# Windows PowerShell:
+.\\.venv\\Scripts\\Activate.ps1
+# macOS/Linux:
+source .venv/bin/activate
 pip install -r requirements.txt
 streamlit run app.py
 ```
